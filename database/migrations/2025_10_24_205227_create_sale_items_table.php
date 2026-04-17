@@ -11,15 +11,17 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('sale_items', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('sale_id')->constrained()->onDelete('cascade');
-            $table->foreignId('product_id')->constrained()->onDelete('restrict');
-            $table->integer('quantity')->default(1);
-            $table->decimal('unit_price', 10, 2)->default(0);
-            $table->decimal('total_price', 10, 2)->default(0);
-            $table->timestamps();
-        });
+        if (!Schema::hasTable('sale_items')) {
+            Schema::create('sale_items', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('sale_id')->constrained()->onDelete('cascade');
+                $table->foreignId('product_id')->constrained()->onDelete('restrict');
+                $table->integer('quantity')->default(1);
+                $table->decimal('unit_price', 10, 2)->default(0);
+                $table->decimal('total_price', 10, 2)->default(0);
+                $table->timestamps();
+            });
+        }
     }
 
     /**

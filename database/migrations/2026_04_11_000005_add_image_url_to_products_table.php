@@ -6,25 +6,19 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::table('products', function (Blueprint $table) {
-            if (!Schema::hasColumn('products', 'low_stock_alert')) {
-                $table->integer('low_stock_alert')->default(10)->after('stock');
+            if (!Schema::hasColumn('products', 'image_url')) {
+                $table->string('image_url')->nullable()->after('active');
             }
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::table('products', function (Blueprint $table) {
-            $table->dropColumn('low_stock_alert');
+            $table->dropColumn('image_url');
         });
     }
 };

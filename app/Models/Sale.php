@@ -14,10 +14,18 @@ class Sale extends Model
     protected $fillable = [
         'user_id',
         'patient_id',
+        'customer_type',
+        'customer_name',
+        'customer_email',
+        'customer_phone',
+        'subtotal',
         'total',
         'discount',
+        'discount_reason',
         'payment_method',
+        'card_authorization_number',
         'status',
+        'notes',
         'meta',
     ];
 
@@ -25,6 +33,7 @@ class Sale extends Model
     {
         return [
             'total' => 'decimal:2',
+            'subtotal' => 'decimal:2',
             'discount' => 'decimal:2',
             'meta' => 'array',
         ];

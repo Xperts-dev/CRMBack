@@ -9,10 +9,21 @@ use App\Models\Product;
 use App\Models\Appointment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class DashboardController extends Controller
 {
+    public function debugStats(Request $request)
+    {
+        return response()->json([
+            'auth_header_present' => $request->headers->has('Authorization'),
+            'user' => $request->user(),
+            'connection' => config('database.default'),
+            'tables' => Schema::getTableListing(),
+        ]);
+    }
+
     public function stats(Request $request)
     {
         $user = $request->user();
@@ -133,7 +144,7 @@ class DashboardController extends Controller
 
         // 5. Citas de hoy
         $todayAppointmentsQuery = Appointment::whereDate('appointment_date', $today)
-            ->whereIn('status', ['scheduled', 'confirmed']);
+            ->whereIn('status', ['pending', 'confirmed']);
         if ($staffMember) {
             $todayAppointmentsQuery->where('staff_member_id', $staffMember->id);
         }
@@ -150,7 +161,7 @@ class DashboardController extends Controller
         // 7. Próximas citas del día
         $upcomingAppointmentsQuery = Appointment::with(['patient', 'staffMember'])
             ->whereDate('appointment_date', $today)
-            ->whereIn('status', ['scheduled', 'confirmed']);
+            ->whereIn('status', ['pending', 'confirmed']);
         if ($staffMember) {
             $upcomingAppointmentsQuery->where('staff_member_id', $staffMember->id);
         }

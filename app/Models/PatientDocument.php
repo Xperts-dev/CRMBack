@@ -22,6 +22,10 @@ class PatientDocument extends Model
         'signed_at',
     ];
 
+    protected $appends = [
+        'url',
+    ];
+
     protected function casts(): array
     {
         return [

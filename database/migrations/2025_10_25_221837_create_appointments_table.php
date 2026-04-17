@@ -11,17 +11,19 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('appointments', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('patient_id')->constrained()->onDelete('cascade');
-            $table->foreignId('staff_member_id')->nullable()->constrained()->onDelete('set null');
-            $table->date('appointment_date');
-            $table->time('appointment_time');
-            $table->string('service');
-            $table->enum('status', ['scheduled', 'confirmed', 'completed', 'cancelled'])->default('scheduled');
-            $table->text('notes')->nullable();
-            $table->timestamps();
-        });
+        if (!Schema::hasTable('appointments')) {
+            Schema::create('appointments', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('patient_id')->constrained()->onDelete('cascade');
+                $table->foreignId('staff_member_id')->nullable()->constrained()->onDelete('set null');
+                $table->date('appointment_date');
+                $table->time('appointment_time');
+                $table->string('service');
+                $table->enum('status', ['pending', 'confirmed', 'completed', 'cancelled'])->default('pending');
+                $table->text('notes')->nullable();
+                $table->timestamps();
+            });
+        }
     }
 
     /**

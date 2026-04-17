@@ -11,18 +11,20 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('patients', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id')->nullable()->constrained()->onDelete('set null');
-            $table->string('name');
-            $table->string('email')->unique();
-            $table->string('phone')->nullable();
-            $table->date('birthday')->nullable();
-            $table->text('address')->nullable();
-            $table->string('qr_code')->unique()->nullable();
-            $table->integer('loyalty_points')->default(0);
-            $table->timestamps();
-        });
+        if (!Schema::hasTable('patients')) {
+            Schema::create('patients', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('user_id')->nullable()->constrained()->onDelete('set null');
+                $table->string('name');
+                $table->string('email')->unique();
+                $table->string('phone')->nullable();
+                $table->date('birthday')->nullable();
+                $table->text('address')->nullable();
+                $table->string('qr_code')->unique()->nullable();
+                $table->integer('loyalty_points')->default(0);
+                $table->timestamps();
+            });
+        }
     }
 
     /**
