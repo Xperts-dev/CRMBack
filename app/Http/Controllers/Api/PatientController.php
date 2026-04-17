@@ -8,6 +8,7 @@ use App\Models\PatientPhoto;
 use App\Models\PatientDocument;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class PatientController extends Controller
 {
@@ -47,7 +48,28 @@ class PatientController extends Controller
             });
         }
 
-        $patients = $query->paginate(20);
+        if ($request->filled('email')) {
+            $query->where('email', $request->email);
+        }
+
+        if ($request->filled('phone')) {
+            $phone = $this->normalizePhone($request->phone);
+            $query->whereRaw("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') = ?", [$phone]);
+        }
+
+        if ($request->filled('date_from')) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->whereDate('created_at', '<=', $request->date_to);
+        }
+
+        if ($request->filled('birthday_month')) {
+            $query->whereMonth('birthday', $request->birthday_month);
+        }
+
+        $patients = $query->latest()->paginate((int) $request->get('per_page', 20));
         return response()->json($patients);
     }
 
@@ -62,6 +84,7 @@ class PatientController extends Controller
             'phone' => 'nullable|string|max:20|regex:/^[0-9+\-\s()]+$/',
             'birthday' => 'nullable|date|before:today',
             'address' => 'nullable|string|max:500',
+            'nit' => 'nullable|string|max:100',
         ]);
 
         $patient = Patient::create($validated);
@@ -111,6 +134,7 @@ class PatientController extends Controller
             'phone' => 'nullable|string|max:20|regex:/^[0-9+\-\s()]+$/',
             'birthday' => 'nullable|date|before:today',
             'address' => 'nullable|string|max:500',
+            'nit' => 'nullable|string|max:100',
         ]);
 
         $patient->update($validated);
@@ -137,17 +161,22 @@ class PatientController extends Controller
         $patient = Patient::findOrFail($id);
 
         $validated = $request->validate([
-            'photo' => 'required|image|mimes:jpeg,jpg,png,webp|max:5120', // 5MB max
-            'type' => 'required|in:before,after,other',
+            'photo' => 'nullable|required_without:photo_base64|image|mimes:jpeg,jpg,png,gif,webp|max:5120',
+            'photo_base64' => 'nullable|required_without:photo|string',
+            'type' => 'nullable|in:before,after,other',
             'notes' => 'nullable|string|max:1000',
         ]);
 
-        $path = $request->file('photo')->store("patients/{$patient->id}/photos", 'public');
+        if ($request->hasFile('photo')) {
+            $path = $request->file('photo')->store("patients/{$patient->id}/photos", 'public');
+        } else {
+            $path = $this->storeBase64PatientPhoto($validated['photo_base64'], $patient->id, $validated['type'] ?? 'before');
+        }
 
         $photo = PatientPhoto::create([
             'patient_id' => $patient->id,
             'path' => $path,
-            'type' => $validated['type'],
+            'type' => $validated['type'] ?? 'before',
             'notes' => $validated['notes'] ?? null,
         ]);
 
@@ -251,5 +280,96 @@ class PatientController extends Controller
             'message' => 'Puntos canjeados exitosamente',
             'loyalty_points' => $patient->fresh()->loyalty_points,
         ]);
+    }
+
+    public function qr(string $id)
+    {
+        $patient = Patient::findOrFail($id);
+        $code = $patient->generateQRCode();
+
+        return response()->json([
+            'qr_code' => $code,
+            'qr_url' => 'https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=' . urlencode($code) . '&chld=L|1',
+        ]);
+    }
+
+    public function findOrCreate(Request $request)
+    {
+        if (!in_array($request->user()?->role, ['superadmin', 'admin', 'staff', 'doctor'], true)) {
+            abort(403, 'No tienes permisos para buscar o crear pacientes');
+        }
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'nullable|email|max:255',
+            'phone' => 'required|string|max:30',
+            'birthday' => 'nullable|date',
+            'address' => 'nullable|string|max:500',
+            'nit' => 'nullable|string|max:100',
+        ]);
+
+        $normalizedPhone = $this->normalizePhone($validated['phone']);
+        $existing = Patient::query()
+            ->where(function ($query) use ($validated, $normalizedPhone) {
+                $query->whereRaw("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') = ?", [$normalizedPhone]);
+
+                if (!empty($validated['email'])) {
+                    $query->orWhere('email', strtolower($validated['email']));
+                }
+            })
+            ->latest()
+            ->first();
+
+        if ($existing) {
+            return response()->json([
+                'patient' => $existing,
+                'created' => false,
+                'message' => 'Paciente existente encontrado',
+            ]);
+        }
+
+        $patient = Patient::create([
+            'name' => $validated['name'],
+            'email' => $validated['email'] ?? ('sin-email-' . Str::uuid() . '@crm.local'),
+            'phone' => $validated['phone'],
+            'birthday' => $validated['birthday'] ?? null,
+            'address' => $validated['address'] ?? null,
+            'nit' => $validated['nit'] ?? null,
+            'loyalty_points' => 0,
+        ]);
+        $patient->generateQRCode();
+
+        return response()->json([
+            'patient' => $patient->fresh(),
+            'created' => true,
+            'message' => 'Paciente creado exitosamente',
+        ], 201);
+    }
+
+    private function normalizePhone(?string $phone): string
+    {
+        return preg_replace('/\D+/', '', (string) $phone);
+    }
+
+    private function storeBase64PatientPhoto(string $payload, int $patientId, string $type): string
+    {
+        $extension = 'jpg';
+        $data = $payload;
+
+        if (preg_match('#^data:image/([a-zA-Z0-9+.-]+);base64,#', $payload, $matches)) {
+            $extension = $matches[1] === 'jpeg' ? 'jpg' : $matches[1];
+            $data = substr($payload, strpos($payload, ',') + 1);
+        }
+
+        $decoded = base64_decode($data, true);
+        if ($decoded === false) {
+            abort(422, 'Imagen invÃ¡lida');
+        }
+
+        $filename = $type . '_' . time() . '_' . Str::random(8) . '.' . $extension;
+        $path = "patients/{$patientId}/photos/{$filename}";
+        Storage::disk('public')->put($path, $decoded);
+
+        return $path;
     }
 }

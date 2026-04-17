@@ -19,6 +19,7 @@ class Patient extends Model
         'phone',
         'birthday',
         'address',
+        'nit',
         'qr_code',
         'loyalty_points',
     ];

@@ -11,14 +11,16 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('patient_photos', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('patient_id')->constrained()->onDelete('cascade');
-            $table->string('path');
-            $table->enum('type', ['before', 'after', 'other'])->default('other');
-            $table->text('notes')->nullable();
-            $table->timestamps();
-        });
+        if (!Schema::hasTable('patient_photos')) {
+            Schema::create('patient_photos', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('patient_id')->constrained()->onDelete('cascade');
+                $table->string('path');
+                $table->enum('type', ['before', 'after', 'other'])->default('other');
+                $table->text('notes')->nullable();
+                $table->timestamps();
+            });
+        }
     }
 
     /**

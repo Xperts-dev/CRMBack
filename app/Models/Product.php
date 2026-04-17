@@ -19,6 +19,7 @@ class Product extends Model
         'low_stock_alert',
         'type',
         'active',
+        'image_url',
     ];
 
     protected function casts(): array

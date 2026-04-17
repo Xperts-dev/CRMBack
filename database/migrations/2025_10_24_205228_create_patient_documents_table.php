@@ -11,18 +11,20 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('patient_documents', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('patient_id')->constrained()->onDelete('cascade');
-            $table->string('name');
-            $table->string('path');
-            $table->enum('type', ['consent', 'contract', 'prescription', 'lab_result', 'other'])->default('other');
-            $table->boolean('requires_signature')->default(false);
-            $table->boolean('is_signed')->default(false);
-            $table->string('signature_path')->nullable();
-            $table->timestamp('signed_at')->nullable();
-            $table->timestamps();
-        });
+        if (!Schema::hasTable('patient_documents')) {
+            Schema::create('patient_documents', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('patient_id')->constrained()->onDelete('cascade');
+                $table->string('name');
+                $table->string('path');
+                $table->enum('type', ['consent', 'contract', 'prescription', 'lab_result', 'other'])->default('other');
+                $table->boolean('requires_signature')->default(false);
+                $table->boolean('is_signed')->default(false);
+                $table->string('signature_path')->nullable();
+                $table->timestamp('signed_at')->nullable();
+                $table->timestamps();
+            });
+        }
     }
 
     /**

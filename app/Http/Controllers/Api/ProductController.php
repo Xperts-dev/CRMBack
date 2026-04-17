@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ProductController extends Controller
 {
@@ -53,6 +54,7 @@ class ProductController extends Controller
             'low_stock_alert' => 'nullable|integer|min:0|max:9999',
             'type' => 'required|in:product,service',
             'active' => 'boolean',
+            'image_url' => 'nullable|string|max:255',
         ]);
 
         $product = Product::create($validated);
@@ -85,6 +87,7 @@ class ProductController extends Controller
             'low_stock_alert' => 'nullable|integer|min:0|max:9999',
             'type' => 'sometimes|required|in:product,service',
             'active' => 'boolean',
+            'image_url' => 'nullable|string|max:255',
         ]);
 
         $product->update($validated);
@@ -143,5 +146,19 @@ class ProductController extends Controller
             'message' => 'Stock actualizado',
             'product' => $product->fresh(),
         ]);
+    }
+
+    public function uploadImage(Request $request, string $id)
+    {
+        $product = Product::findOrFail($id);
+        $validated = $request->validate([
+            'image' => 'required|image|mimes:jpeg,jpg,png,webp|max:5120',
+        ]);
+
+        $path = $validated['image']->store("products/{$product->id}", 'public');
+        $imageUrl = Storage::disk('public')->url($path);
+        $product->update(['image_url' => $imageUrl]);
+
+        return response()->json(['image_url' => $imageUrl]);
     }
 }

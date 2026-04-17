@@ -16,6 +16,8 @@ class SaleItem extends Model
         'quantity',
         'unit_price',
         'total_price',
+        'price',
+        'subtotal',
     ];
 
     protected function casts(): array
@@ -24,6 +26,8 @@ class SaleItem extends Model
             'quantity' => 'integer',
             'unit_price' => 'decimal:2',
             'total_price' => 'decimal:2',
+            'price' => 'decimal:2',
+            'subtotal' => 'decimal:2',
         ];
     }
 

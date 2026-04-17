@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Models\Patient;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -57,6 +58,9 @@ class AuthController extends Controller
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
             'role' => 'patient',
+            'phone' => $validated['phone'] ?? null,
+            'email_verification_token' => Str::random(64),
+            'email_verification_sent_at' => now(),
         ]);
 
         // Create patient profile
@@ -104,6 +108,8 @@ class AuthController extends Controller
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
             'role' => $validated['role'],
+            'email_verification_token' => Str::random(64),
+            'email_verification_sent_at' => now(),
         ]);
 
         return response()->json([
@@ -129,6 +135,54 @@ class AuthController extends Controller
 
         return response()->json([
             'user' => $user,
+        ]);
+    }
+
+    public function debugToken(Request $request)
+    {
+        $token = $request->bearerToken();
+        $accessToken = $request->user()?->currentAccessToken();
+
+        return response()->json([
+            'auth_header_present' => $request->headers->has('Authorization'),
+            'token_extracted' => $token,
+            'token_valid' => (bool) $request->user(),
+            'token_data' => $accessToken ? [
+                'id' => $accessToken->id,
+                'name' => $accessToken->name,
+                'abilities' => $accessToken->abilities,
+                'created_at' => $accessToken->created_at,
+                'last_used_at' => $accessToken->last_used_at,
+            ] : null,
+            'user' => $request->user(),
+            'guard' => 'sanctum',
+        ]);
+    }
+
+    /**
+     * Verify user email from public token.
+     */
+    public function verifyEmail(Request $request)
+    {
+        $validated = $request->validate([
+            'token' => 'required|string',
+        ]);
+
+        $user = User::where('email_verification_token', $validated['token'])->first();
+
+        if (!$user) {
+            return response()->json(['message' => 'Token de verificaciÃ³n invÃ¡lido'], 404);
+        }
+
+        $user->update([
+            'email_verified' => true,
+            'email_verified_at' => now(),
+            'email_verification_token' => null,
+        ]);
+
+        return response()->json([
+            'message' => 'Email verificado exitosamente',
+            'user' => $user->fresh(),
         ]);
     }
 

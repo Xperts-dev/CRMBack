@@ -24,6 +24,12 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'phone',
+        'active',
+        'photo_url',
+        'email_verification_token',
+        'email_verification_sent_at',
+        'email_verified',
     ];
 
     /**
@@ -45,6 +51,9 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'email_verification_sent_at' => 'datetime',
+            'email_verified' => 'boolean',
+            'active' => 'boolean',
             'password' => 'hashed',
         ];
     }
@@ -71,7 +80,12 @@ class User extends Authenticatable
     // Role helpers
     public function isAdmin(): bool
     {
-        return $this->role === 'admin';
+        return in_array($this->role, ['superadmin', 'admin'], true);
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        return $this->role === 'superadmin';
     }
 
     public function isDoctor(): bool

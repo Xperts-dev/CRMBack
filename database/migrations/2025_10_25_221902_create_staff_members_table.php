@@ -11,17 +11,19 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('staff_members', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id')->nullable()->constrained()->onDelete('cascade');
-            $table->string('name');
-            $table->string('position')->nullable();
-            $table->string('specialization')->nullable();
-            $table->string('phone')->nullable();
-            $table->string('email')->nullable();
-            $table->string('avatar')->nullable();
-            $table->timestamps();
-        });
+        if (!Schema::hasTable('staff_members')) {
+            Schema::create('staff_members', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('user_id')->nullable()->constrained()->onDelete('cascade');
+                $table->string('name');
+                $table->string('position')->nullable();
+                $table->string('specialization')->nullable();
+                $table->string('phone')->nullable();
+                $table->string('email')->nullable();
+                $table->string('avatar')->nullable();
+                $table->timestamps();
+            });
+        }
     }
 
     /**

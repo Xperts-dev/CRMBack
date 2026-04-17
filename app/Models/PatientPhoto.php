@@ -18,6 +18,10 @@ class PatientPhoto extends Model
         'notes',
     ];
 
+    protected $appends = [
+        'url',
+    ];
+
     public function patient(): BelongsTo
     {
         return $this->belongsTo(Patient::class);
