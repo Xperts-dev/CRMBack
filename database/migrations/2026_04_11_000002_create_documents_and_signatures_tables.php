@@ -11,8 +11,8 @@ return new class extends Migration
         if (!Schema::hasTable('documents')) {
             Schema::create('documents', function (Blueprint $table) {
                 $table->increments('id');
-                $table->integer('patient_id');
-                $table->integer('uploaded_by')->nullable();
+                $table->unsignedBigInteger('patient_id');
+                $table->unsignedBigInteger('uploaded_by')->nullable();
                 $table->string('title')->nullable();
                 $table->string('filename');
                 $table->string('original_filename')->nullable();
@@ -34,7 +34,7 @@ return new class extends Migration
             Schema::create('document_signatures', function (Blueprint $table) {
                 $table->increments('id');
                 $table->unsignedInteger('document_id');
-                $table->integer('signed_by')->nullable();
+                $table->unsignedBigInteger('signed_by')->nullable();
                 $table->string('signature_method', 50)->default('manual');
                 $table->string('signature_file')->nullable();
                 $table->json('meta')->nullable();
