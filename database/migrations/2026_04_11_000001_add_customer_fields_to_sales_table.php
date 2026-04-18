@@ -34,7 +34,7 @@ return new class extends Migration
         });
 
         if (Schema::hasColumn('sales', 'patient_id') && DB::getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE sales MODIFY patient_id INT NULL');
+              DB::statement('ALTER TABLE sales MODIFY patient_id BIGINT UNSIGNED NULL');
         }
     }
 
