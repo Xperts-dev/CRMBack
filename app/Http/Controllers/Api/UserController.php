@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Patient;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -64,6 +65,7 @@ class UserController extends Controller
         }
 
         $user = User::create($validated);
+        $this->syncPatientProfile($user);
 
         return response()->json($user->only(['id', 'name', 'email', 'role', 'phone', 'active', 'created_at']), 201);
     }
@@ -91,6 +93,7 @@ class UserController extends Controller
         }
 
         $user->update($validated);
+        $this->syncPatientProfile($user);
 
         return response()->json($user->only(['id', 'name', 'email', 'role', 'phone', 'active', 'created_at', 'updated_at']));
     }
@@ -108,8 +111,30 @@ class UserController extends Controller
             abort(403, 'Solo superadmin puede eliminar superadmins');
         }
 
+        Patient::where('user_id', $user->id)->delete();
         $user->delete();
 
         return response()->json(['message' => 'Usuario eliminado exitosamente']);
+    }
+
+    private function syncPatientProfile(User $user): void
+    {
+        if ($user->role !== 'patient') {
+            Patient::where('user_id', $user->id)->delete();
+            return;
+        }
+
+        $patient = Patient::updateOrCreate(
+            ['user_id' => $user->id],
+            [
+                'name' => $user->name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+            ]
+        );
+
+        if (empty($patient->qr_code)) {
+            $patient->generateQRCode();
+        }
     }
 }
