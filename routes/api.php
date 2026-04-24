@@ -79,6 +79,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/documents/{id}/sign', [DocumentController::class, 'sign']);
 
     // Appointments
+    Route::get('/my-appointments', [AppointmentController::class, 'mine']);
     Route::get('/appointments/availability', [AppointmentController::class, 'availability']);
     Route::apiResource('appointments', AppointmentController::class);
     Route::patch('/appointments/{id}/status', [AppointmentController::class, 'updateStatus']);

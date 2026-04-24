@@ -4,161 +4,206 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Appointment;
-use Illuminate\Http\Request;
+use App\Models\Patient;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Throwable;
 
 class AppointmentController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = Appointment::with(['patient', 'staffMember'])
-            ->filterByDoctor($user);
+        $query = Appointment::with(['patient', 'staffMember'])->filterByDoctor($user);
 
-        // Filtrar por fecha
-        if ($request->has('date')) {
+        if ($user->isPatient()) {
+            $patient = $this->patientForUser($request);
+            if (!$patient) {
+                return response()->json([
+                    'data' => [],
+                    'current_page' => 1,
+                    'last_page' => 1,
+                    'total' => 0,
+                ]);
+            }
+
+            $query->where('patient_id', $patient->id);
+        }
+
+        if ($request->filled('date')) {
             $query->whereDate('appointment_date', $request->date);
         }
 
-        // Filtrar por estado
-        if ($request->has('status')) {
+        if ($request->filled('from')) {
+            $query->whereDate('appointment_date', '>=', $request->from);
+        }
+
+        if ($request->filled('to')) {
+            $query->whereDate('appointment_date', '<=', $request->to);
+        }
+
+        if ($request->filled('upcoming')) {
+            $query->whereDate('appointment_date', '>=', now()->toDateString())
+                ->where('status', '!=', 'cancelled');
+        }
+
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
-        // Filtrar por paciente
-        if ($request->has('patient_id')) {
+        if ($request->filled('patient_id') && !$user->isPatient()) {
             $query->where('patient_id', $request->patient_id);
         }
 
-        // Filtrar por staff (solo si no es doctor, ya que los doctores ya están filtrados)
-        if ($request->has('staff_member_id') && !$user->isDoctor()) {
+        if ($request->filled('staff_member_id') && !$user->isDoctor()) {
             $query->where('staff_member_id', $request->staff_member_id);
         }
 
         $appointments = $query->orderBy('appointment_date', 'desc')
-                              ->orderBy('appointment_time', 'desc')
-                              ->paginate(20);
+            ->orderBy('appointment_time', 'desc')
+            ->paginate((int) $request->get('per_page', 20));
 
         return response()->json($appointments);
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
+    public function mine(Request $request)
+    {
+        if (!$request->user()->isPatient()) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
+        return $this->index($request);
+    }
+
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'patient_id' => 'required|exists:patients,id',
+            'patient_id' => 'nullable|exists:patients,id',
             'staff_member_id' => 'nullable|exists:staff_members,id',
             'appointment_date' => 'required|date|after_or_equal:today',
             'appointment_time' => 'required|date_format:H:i:s',
-            'service' => 'required|string|max:255|regex:/^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s\-_.]+$/',
+            'service' => ['required', 'string', 'max:255', 'regex:/^[\pL\pN\s\-_.]+$/u'],
             'status' => 'sometimes|in:pending,confirmed,completed,cancelled',
             'notes' => 'nullable|string|max:2000',
         ]);
 
-        // Validar que no haya conflictos de horario cuando se asigna staff
-        $staffMemberId = $validated['staff_member_id'] ?? null;
-        if ($staffMemberId) {
-            $existingAppointment = Appointment::where('staff_member_id', $staffMemberId)
-                ->where('appointment_date', $validated['appointment_date'])
-                ->where('appointment_time', $validated['appointment_time'])
-                ->where('status', '!=', 'cancelled')
-                ->first();
-
-            if ($existingAppointment) {
-                return response()->json([
-                    'message' => 'Ya existe una cita en este horario'
-                ], 422);
+        if ($request->user()->isPatient()) {
+            $patient = $this->patientForUser($request);
+            if (!$patient) {
+                return response()->json(['message' => 'No se encontro el perfil de paciente para este usuario'], 422);
             }
+
+            if (isset($validated['patient_id']) && (int) $validated['patient_id'] !== (int) $patient->id) {
+                return response()->json(['message' => 'No autorizado para crear citas de otro paciente'], 403);
+            }
+
+            $validated['patient_id'] = $patient->id;
+        } elseif (empty($validated['patient_id'])) {
+            return response()->json(['message' => 'El paciente es requerido'], 422);
+        }
+
+        $conflict = Appointment::query()
+            ->when($validated['staff_member_id'] ?? null, fn ($query, $staffId) => $query->where('staff_member_id', $staffId))
+            ->whereDate('appointment_date', $validated['appointment_date'])
+            ->where('appointment_time', $validated['appointment_time'])
+            ->where('status', '!=', 'cancelled')
+            ->exists();
+
+        if ($conflict) {
+            return response()->json(['message' => 'Ya existe una cita en este horario'], 422);
         }
 
         $validated['status'] = $validated['status'] ?? 'pending';
-        $appointment = Appointment::create($validated);
-        $appointment->load(['patient', 'staffMember']);
 
-        return response()->json($appointment, 201);
+        $appointment = Appointment::create($validated)->fresh(['patient', 'staffMember']);
+        $emailSent = $this->sendAppointmentEmail($appointment, 'confirmacion');
+
+        return response()->json($appointment->toArray() + [
+            'email_sent' => $emailSent,
+        ], 201);
     }
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(string $id)
+    public function show(Request $request, string $id)
     {
         $appointment = Appointment::with(['patient', 'staffMember'])->findOrFail($id);
+        if (!$this->canAccessAppointment($request, $appointment)) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
         return response()->json($appointment);
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
     public function update(Request $request, string $id)
     {
         $appointment = Appointment::findOrFail($id);
+        if (!$this->canAccessAppointment($request, $appointment)) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
 
         $validated = $request->validate([
             'patient_id' => 'sometimes|required|exists:patients,id',
             'staff_member_id' => 'nullable|exists:staff_members,id',
             'appointment_date' => 'sometimes|required|date|after_or_equal:today',
             'appointment_time' => 'sometimes|required|date_format:H:i:s',
-            'service' => 'sometimes|required|string|max:255|regex:/^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s\-_.]+$/',
+            'service' => ['sometimes', 'required', 'string', 'max:255', 'regex:/^[\pL\pN\s\-_.]+$/u'],
             'status' => 'sometimes|in:pending,confirmed,completed,cancelled',
             'notes' => 'nullable|string|max:2000',
         ]);
 
-        // Validar que no haya conflictos de horario (excepto esta cita)
-        if (isset($validated['staff_member_id']) || isset($validated['appointment_date']) || isset($validated['appointment_time'])) {
-            $existingAppointment = Appointment::where('id', '!=', $id)
-                ->where('staff_member_id', $validated['staff_member_id'] ?? $appointment->staff_member_id)
-                ->where('appointment_date', $validated['appointment_date'] ?? $appointment->appointment_date)
-                ->where('appointment_time', $validated['appointment_time'] ?? $appointment->appointment_time)
-                ->where('status', '!=', 'cancelled')
-                ->first();
+        if ($request->user()->isPatient()) {
+            unset($validated['patient_id'], $validated['status']);
+        }
 
-            if ($existingAppointment) {
-                return response()->json([
-                    'message' => 'Ya existe una cita en este horario'
-                ], 422);
+        if ($this->hasScheduleChange($validated)) {
+            $conflict = $this->hasScheduleConflict(
+                $appointment,
+                $validated['appointment_date'] ?? $appointment->appointment_date,
+                $validated['appointment_time'] ?? $appointment->appointment_time,
+                $validated['staff_member_id'] ?? $appointment->staff_member_id,
+            );
+
+            if ($conflict) {
+                return response()->json(['message' => 'Ya existe una cita en este horario'], 422);
             }
         }
 
         $appointment->update($validated);
-        $appointment->load(['patient', 'staffMember']);
 
-        return response()->json($appointment);
+        return response()->json($appointment->fresh(['patient', 'staffMember']));
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(string $id)
+    public function destroy(Request $request, string $id)
     {
         $appointment = Appointment::findOrFail($id);
+        if (!$this->canAccessAppointment($request, $appointment)) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
         $appointment->delete();
 
-        return response()->json([
-            'message' => 'Cita eliminada exitosamente'
-        ]);
+        return response()->json(['message' => 'Cita eliminada exitosamente']);
     }
 
-    /**
-     * Update appointment status
-     */
     public function updateStatus(Request $request, string $id)
     {
         $appointment = Appointment::findOrFail($id);
+        if (!$this->canAccessAppointment($request, $appointment)) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
 
         $validated = $request->validate([
             'status' => 'required|in:pending,confirmed,completed,cancelled',
         ]);
 
-        $appointment->update($validated);
-        $appointment->load(['patient', 'staffMember']);
+        if ($request->user()->isPatient() && $validated['status'] !== 'cancelled') {
+            return response()->json(['message' => 'Los pacientes solo pueden cancelar sus citas'], 403);
+        }
 
-        return response()->json($appointment);
+        $appointment->update($validated);
+
+        return response()->json($appointment->fresh(['patient', 'staffMember']));
     }
 
     public function availability(Request $request)
@@ -211,9 +256,13 @@ class AppointmentController extends Controller
         ]);
     }
 
-    public function cancel(string $id)
+    public function cancel(Request $request, string $id)
     {
         $appointment = Appointment::findOrFail($id);
+        if (!$this->canAccessAppointment($request, $appointment)) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
         $appointment->update(['status' => 'cancelled']);
 
         return response()->json($appointment->fresh(['patient', 'staffMember']));
@@ -222,6 +271,10 @@ class AppointmentController extends Controller
     public function reschedule(Request $request, string $id)
     {
         $appointment = Appointment::findOrFail($id);
+        if (!$this->canAccessAppointment($request, $appointment)) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
         $validated = $request->validate([
             'appointment_date' => 'required_without:date|date|after_or_equal:today',
             'date' => 'required_without:appointment_date|date|after_or_equal:today',
@@ -231,18 +284,9 @@ class AppointmentController extends Controller
 
         $date = $validated['appointment_date'] ?? $validated['date'];
         $staffMemberId = $validated['staff_member_id'] ?? $appointment->staff_member_id;
-        if ($staffMemberId) {
-            $conflict = Appointment::query()
-                ->where('id', '!=', $appointment->id)
-                ->whereDate('appointment_date', $date)
-                ->where('appointment_time', $validated['appointment_time'])
-                ->where('staff_member_id', $staffMemberId)
-                ->where('status', '!=', 'cancelled')
-                ->exists();
 
-            if ($conflict) {
-                return response()->json(['message' => 'Ya existe una cita para este horario y miembro del staff'], 409);
-            }
+        if ($this->hasScheduleConflict($appointment, $date, $validated['appointment_time'], $staffMemberId)) {
+            return response()->json(['message' => 'Ya existe una cita para este horario y miembro del staff'], 409);
         }
 
         $appointment->update([
@@ -255,9 +299,13 @@ class AppointmentController extends Controller
         return response()->json($appointment->fresh(['patient', 'staffMember']));
     }
 
-    public function generateReminder(string $id)
+    public function generateReminder(Request $request, string $id)
     {
         $appointment = Appointment::with(['patient', 'staffMember'])->findOrFail($id);
+        if (!$this->canAccessAppointment($request, $appointment)) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
         $patient = $appointment->patient;
         $staff = $appointment->staffMember;
 
@@ -278,31 +326,134 @@ class AppointmentController extends Controller
         ]);
     }
 
-    public function sendEmail(string $id)
+    public function sendEmail(Request $request, string $id)
     {
-        $appointment = Appointment::with('patient')->findOrFail($id);
+        $appointment = Appointment::with(['patient', 'staffMember'])->findOrFail($id);
+        if (!$this->canAccessAppointment($request, $appointment)) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
         if (!$appointment->patient?->email) {
             return response()->json(['message' => 'El paciente no tiene email registrado'], 400);
         }
 
+        $sent = $this->sendAppointmentEmail($appointment, 'recordatorio');
+
         return response()->json([
-            'sent' => false,
+            'sent' => $sent,
             'email' => $appointment->patient->email,
-            'message' => 'Endpoint disponible; configura Mailer para envío real',
+            'message' => $sent ? 'Email enviado' : 'No se pudo enviar el email; revisa la configuracion del mailer',
         ]);
     }
 
-    public function sendWhatsApp(string $id)
+    public function sendWhatsApp(Request $request, string $id)
     {
         $appointment = Appointment::with('patient')->findOrFail($id);
+        if (!$this->canAccessAppointment($request, $appointment)) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
         if (!$appointment->patient?->phone) {
-            return response()->json(['message' => 'El paciente no tiene número de teléfono registrado'], 400);
+            return response()->json(['message' => 'El paciente no tiene numero de telefono registrado'], 400);
         }
 
         return response()->json([
             'sent' => false,
             'phone' => $appointment->patient->phone,
-            'message' => 'Endpoint disponible; configura Twilio/WhatsApp para envío real',
+            'message' => 'Endpoint disponible; configura Twilio/WhatsApp para envio real',
         ]);
+    }
+
+    private function patientForUser(Request $request): ?Patient
+    {
+        $user = $request->user();
+
+        return Patient::query()
+            ->where('user_id', $user->id)
+            ->orWhere('email', $user->email)
+            ->first();
+    }
+
+    private function canAccessAppointment(Request $request, Appointment $appointment): bool
+    {
+        $user = $request->user();
+        if (!$user) {
+            return false;
+        }
+
+        if ($user->isAdmin() || $user->isStaff()) {
+            return true;
+        }
+
+        if ($user->isDoctor()) {
+            return (int) $appointment->staff_member_id === (int) optional($user->staffMember)->id;
+        }
+
+        if ($user->isPatient()) {
+            $patient = $this->patientForUser($request);
+            return $patient && (int) $appointment->patient_id === (int) $patient->id;
+        }
+
+        return false;
+    }
+
+    private function hasScheduleChange(array $validated): bool
+    {
+        return array_key_exists('staff_member_id', $validated)
+            || array_key_exists('appointment_date', $validated)
+            || array_key_exists('appointment_time', $validated);
+    }
+
+    private function hasScheduleConflict(Appointment $appointment, string|Carbon $date, string $time, ?int $staffMemberId): bool
+    {
+        return Appointment::query()
+            ->where('id', '!=', $appointment->id)
+            ->when($staffMemberId, fn ($query) => $query->where('staff_member_id', $staffMemberId))
+            ->whereDate('appointment_date', $date)
+            ->where('appointment_time', $time)
+            ->where('status', '!=', 'cancelled')
+            ->exists();
+    }
+
+    private function sendAppointmentEmail(Appointment $appointment, string $type): bool
+    {
+        $appointment->loadMissing(['patient', 'staffMember']);
+        $patient = $appointment->patient;
+
+        if (!$patient?->email) {
+            return false;
+        }
+
+        $date = Carbon::parse($appointment->appointment_date)->locale('es')->translatedFormat('d/m/Y');
+        $time = Carbon::parse($appointment->appointment_time)->format('h:i A');
+        $staff = $appointment->staffMember ? ' con ' . $appointment->staffMember->name : '';
+        $subject = $type === 'confirmacion' ? 'Confirmacion de cita' : 'Recordatorio de cita';
+
+        $body = implode("\n", [
+            "Hola {$patient->name},",
+            '',
+            "Tu cita de {$appointment->service} quedo programada para el {$date} a las {$time}{$staff}.",
+            '',
+            'Si necesitas reagendar o cancelar, ingresa a tu cuenta y abre la seccion de Mis citas.',
+            '',
+            config('app.name'),
+        ]);
+
+        try {
+            Mail::raw($body, function ($message) use ($patient, $subject) {
+                $message->to($patient->email, $patient->name)->subject($subject);
+            });
+
+            return true;
+        } catch (Throwable $exception) {
+            Log::warning('Appointment email could not be sent', [
+                'appointment_id' => $appointment->id,
+                'patient_id' => $patient->id,
+                'email' => $patient->email,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 }

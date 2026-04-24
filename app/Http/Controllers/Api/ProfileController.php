@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Patient;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -59,7 +60,12 @@ class ProfileController extends Controller
             return response()->json(['message' => 'Contraseña actual incorrecta'], 401);
         }
 
-        $request->user()->update(['password' => $validated['new_password']]);
+        $updates = ['password' => $validated['new_password']];
+        if (Schema::hasColumn('users', 'must_change_password')) {
+            $updates['must_change_password'] = false;
+        }
+
+        $request->user()->update($updates);
 
         return response()->json(['message' => 'Contraseña actualizada']);
     }
