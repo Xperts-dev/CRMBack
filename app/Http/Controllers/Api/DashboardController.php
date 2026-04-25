@@ -51,9 +51,23 @@ class DashboardController extends Controller
             }
         }
 
-        // Fecha actual y del mes anterior
-        $currentMonth = Carbon::now()->startOfMonth();
-        $previousMonth = Carbon::now()->subMonth()->startOfMonth();
+        $fromInput = $request->get('from', $request->get('date_from', $request->get('start_date')));
+        $toInput = $request->get('to', $request->get('date_to', $request->get('end_date')));
+
+        $rangeStart = $fromInput
+            ? Carbon::parse($fromInput)->startOfDay()
+            : Carbon::now()->startOfMonth();
+        $rangeEnd = $toInput
+            ? Carbon::parse($toInput)->endOfDay()
+            : Carbon::now()->endOfMonth();
+
+        if ($rangeEnd->lessThan($rangeStart)) {
+            [$rangeStart, $rangeEnd] = [$rangeEnd->copy()->startOfDay(), $rangeStart->copy()->endOfDay()];
+        }
+
+        $rangeDays = $rangeStart->diffInDays($rangeEnd) + 1;
+        $previousRangeEnd = $rangeStart->copy()->subSecond();
+        $previousRangeStart = $previousRangeEnd->copy()->subDays($rangeDays - 1)->startOfDay();
         $today = Carbon::today();
 
         // Obtener IDs de pacientes del doctor (si aplica)
@@ -65,18 +79,17 @@ class DashboardController extends Controller
                 ->toArray();
         }
 
-        // 1. Ingresos del mes actual
-        $monthlyIncomeQuery = Sale::where('created_at', '>=', $currentMonth);
+        // 1. Ingresos del rango seleccionado
+        $monthlyIncomeQuery = Sale::whereBetween('created_at', [$rangeStart, $rangeEnd])
+            ->where('status', 'completed');
         if ($patientIds !== null) {
             $monthlyIncomeQuery->whereIn('patient_id', $patientIds);
         }
         $monthlyIncome = $monthlyIncomeQuery->sum('total');
         
-        // Ingresos del mes anterior para calcular cambio
-        $previousMonthIncomeQuery = Sale::whereBetween('created_at', [
-            $previousMonth,
-            $currentMonth
-        ]);
+        // Ingresos del periodo anterior equivalente para calcular cambio
+        $previousMonthIncomeQuery = Sale::whereBetween('created_at', [$previousRangeStart, $previousRangeEnd])
+            ->where('status', 'completed');
         if ($patientIds !== null) {
             $previousMonthIncomeQuery->whereIn('patient_id', $patientIds);
         }
@@ -86,17 +99,14 @@ class DashboardController extends Controller
             ? (($monthlyIncome - $previousMonthIncome) / $previousMonthIncome) * 100 
             : 0;
 
-        // 2. Nuevos pacientes del mes
-        $newPatientsQuery = Patient::where('created_at', '>=', $currentMonth);
+        // 2. Nuevos pacientes del rango
+        $newPatientsQuery = Patient::whereBetween('created_at', [$rangeStart, $rangeEnd]);
         if ($patientIds !== null) {
             $newPatientsQuery->whereIn('id', $patientIds);
         }
         $newPatientsMonth = $newPatientsQuery->count();
         
-        $previousMonthPatientsQuery = Patient::whereBetween('created_at', [
-            $previousMonth,
-            $currentMonth
-        ]);
+        $previousMonthPatientsQuery = Patient::whereBetween('created_at', [$previousRangeStart, $previousRangeEnd]);
         if ($patientIds !== null) {
             $previousMonthPatientsQuery->whereIn('id', $patientIds);
         }
@@ -107,17 +117,16 @@ class DashboardController extends Controller
             : 0;
 
         // 3. Valor promedio por cita (ticket promedio)
-        $currentMonthSalesQuery = Sale::where('created_at', '>=', $currentMonth);
+        $currentMonthSalesQuery = Sale::whereBetween('created_at', [$rangeStart, $rangeEnd])
+            ->where('status', 'completed');
         if ($patientIds !== null) {
             $currentMonthSalesQuery->whereIn('patient_id', $patientIds);
         }
         $currentMonthSales = $currentMonthSalesQuery->count();
         $averageTicket = $currentMonthSales > 0 ? $monthlyIncome / $currentMonthSales : 0;
         
-        $previousMonthSalesQuery = Sale::whereBetween('created_at', [
-            $previousMonth,
-            $currentMonth
-        ]);
+        $previousMonthSalesQuery = Sale::whereBetween('created_at', [$previousRangeStart, $previousRangeEnd])
+            ->where('status', 'completed');
         if ($patientIds !== null) {
             $previousMonthSalesQuery->whereIn('patient_id', $patientIds);
         }
@@ -181,11 +190,12 @@ class DashboardController extends Controller
         // 8. Rendimiento mensual (últimos 6 meses)
         $monthlyPerformance = [];
         for ($i = 5; $i >= 0; $i--) {
-            $month = Carbon::now()->subMonths($i);
+            $month = $rangeEnd->copy()->subMonthsNoOverflow($i);
             $startOfMonth = $month->copy()->startOfMonth();
             $endOfMonth = $month->copy()->endOfMonth();
             
-            $salesCountQuery = Sale::whereBetween('created_at', [$startOfMonth, $endOfMonth]);
+            $salesCountQuery = Sale::whereBetween('created_at', [$startOfMonth, $endOfMonth])
+                ->where('status', 'completed');
             if ($patientIds !== null) {
                 $salesCountQuery->whereIn('patient_id', $patientIds);
             }
