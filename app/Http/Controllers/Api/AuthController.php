@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Patient;
+use App\Support\AccountEmailer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -41,7 +42,7 @@ class AuthController extends Controller
     /**
      * Register new patient
      */
-    public function registerPatient(Request $request)
+    public function registerPatient(Request $request, AccountEmailer $accountEmailer)
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255|regex:/^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/',
@@ -77,19 +78,21 @@ class AuthController extends Controller
         // Generate QR code
         $patient->generateQRCode();
 
+        $emailSent = $accountEmailer->sendWelcomeVerification($user);
         $token = $user->createToken('api-token')->plainTextToken;
 
         return response()->json([
             'user' => $user,
             'patient' => $patient,
             'token' => $token,
+            'email_sent' => $emailSent,
         ], 201);
     }
 
     /**
      * Register staff/doctor (admin only)
      */
-    public function registerStaff(Request $request)
+    public function registerStaff(Request $request, AccountEmailer $accountEmailer)
     {
         // Verify admin role
         if (!$request->user()->isAdmin()) {
@@ -112,8 +115,11 @@ class AuthController extends Controller
             'email_verification_sent_at' => now(),
         ]);
 
+        $emailSent = $accountEmailer->sendWelcomeVerification($user);
+
         return response()->json([
             'user' => $user,
+            'email_sent' => $emailSent,
         ], 201);
     }
 

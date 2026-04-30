@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\EmailTemplateController;
 use App\Http\Controllers\Api\QrController;
 use App\Http\Controllers\Api\AssistantConversationController;
 use App\Http\Controllers\Api\SystemSettingsController;
+use App\Http\Controllers\Api\CustomerSatisfactionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -109,4 +110,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // QR
     Route::post('/qr/scan', [QrController::class, 'scan']);
+
+    // Customer satisfaction
+    Route::get('/customer-satisfaction', [CustomerSatisfactionController::class, 'index']);
+    Route::get('/customer-satisfaction/pending', [CustomerSatisfactionController::class, 'pending']);
+    Route::post('/customer-satisfaction', [CustomerSatisfactionController::class, 'store']);
+    Route::get('/customer-satisfaction/{id}', [CustomerSatisfactionController::class, 'show']);
 });

@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Patient;
 use App\Models\User;
+use App\Support\AccountEmailer;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class UserController extends Controller
@@ -47,7 +49,7 @@ class UserController extends Controller
             ->findOrFail($id));
     }
 
-    public function store(Request $request)
+    public function store(Request $request, AccountEmailer $accountEmailer)
     {
         $this->authorizeManageUsers($request);
 
@@ -64,10 +66,16 @@ class UserController extends Controller
             abort(403, 'Solo superadmin puede crear otros superadmins');
         }
 
+        $validated['email_verification_token'] = Str::random(64);
+        $validated['email_verification_sent_at'] = now();
+
         $user = User::create($validated);
         $this->syncPatientProfile($user);
+        $emailSent = $accountEmailer->sendWelcomeVerification($user);
 
-        return response()->json($user->only(['id', 'name', 'email', 'role', 'phone', 'active', 'created_at']), 201);
+        return response()->json($user->only(['id', 'name', 'email', 'role', 'phone', 'active', 'created_at']) + [
+            'email_sent' => $emailSent,
+        ], 201);
     }
 
     public function update(Request $request, string $id)
