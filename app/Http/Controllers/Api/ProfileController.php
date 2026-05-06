@@ -22,7 +22,15 @@ class ProfileController extends Controller
         }
 
         if (in_array($user->role, ['admin', 'doctor', 'staff'], true)) {
-            $response['staff_member'] = $user->staffMember;
+            $response['staff_member'] = $user->staffMember ?: [
+                'user_id' => $user->id,
+                'name' => $user->name,
+                'position' => $user->role,
+                'specialization' => null,
+                'phone' => $user->phone,
+                'email' => $user->email,
+                'avatar' => $user->photo_url,
+            ];
         }
 
         return response()->json($response);

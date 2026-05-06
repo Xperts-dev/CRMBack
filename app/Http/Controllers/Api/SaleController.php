@@ -50,12 +50,16 @@ class SaleController extends Controller
      */
     public function store(Request $request)
     {
+        $this->normalizeSaleInput($request);
+
         $validated = $request->validate([
             'patient_id' => 'nullable|exists:patients,id',
             'customer_type' => 'nullable|in:patient,employee,walk_in',
             'customer_name' => 'nullable|string|max:255',
             'customer_email' => 'nullable|email|max:255',
             'customer_phone' => 'nullable|string|max:30',
+            'nit' => 'nullable|string|max:100|regex:/^(?:CF|[0-9]+-?[0-9K])$/',
+            'customer_nit' => 'nullable|string|max:100|regex:/^(?:CF|[0-9]+-?[0-9K])$/',
             'discount' => 'nullable|numeric|min:0',
             'discount_reason' => 'nullable|string|max:255',
             'payment_method' => 'required|in:cash,card,transfer,other',
@@ -71,6 +75,12 @@ class SaleController extends Controller
         try {
             $total = 0;
             $patientId = $validated['patient_id'] ?? null;
+            $nit = $validated['customer_nit'] ?? $validated['nit'] ?? null;
+
+            if (!$patientId && $nit && !in_array($nit, ['CF', 'C/F', 'C-F'], true)) {
+                $patientId = Patient::where('nit', $nit)->value('id');
+            }
+
             $customerType = $validated['customer_type'] ?? ($patientId ? 'patient' : 'walk_in');
             if ($customerType === 'patient' && !$patientId) {
                 $customerType = 'walk_in';
@@ -94,13 +104,14 @@ class SaleController extends Controller
                     : null,
                 'status' => 'completed',
                 'notes' => $validated['notes'] ?? null,
+                'meta' => $nit ? ['nit' => $nit] : null,
             ]);
 
             // Process items
             foreach ($validated['items'] as $item) {
                 $product = Product::findOrFail($item['product_id']);
                 $quantity = $item['quantity'];
-                $unitPrice = array_key_exists('price', $item) ? $item['price'] : $product->price;
+                $unitPrice = array_key_exists('price', $item) && $item['price'] !== null ? $item['price'] : $product->price;
                 $totalPrice = $unitPrice * $quantity;
 
                 // Decrement stock if it's a product (not service)
@@ -239,5 +250,67 @@ class SaleController extends Controller
         ];
 
         return response()->json($stats);
+    }
+
+    private function normalizeSaleInput(Request $request): void
+    {
+        $updates = [];
+
+        foreach (['nit', 'customer_nit', 'tax_id', 'taxId'] as $field) {
+            if ($request->filled($field)) {
+                $normalized = $this->normalizeNit((string) $request->input($field));
+                $updates['nit'] = $normalized;
+                $updates['customer_nit'] = $normalized;
+                break;
+            }
+        }
+
+        $items = $request->input('items');
+        if (is_array($items)) {
+            foreach ($items as $index => $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+
+                foreach (['price', 'unit_price', 'unitPrice', 'cost', 'costo'] as $alias) {
+                    if (array_key_exists($alias, $item) && $item[$alias] !== null && $item[$alias] !== '') {
+                        $items[$index]['price'] = $this->normalizeMoney($item[$alias]);
+                        break;
+                    }
+                }
+            }
+
+            $updates['items'] = $items;
+        }
+
+        if ($updates) {
+            $request->merge($updates);
+        }
+    }
+
+    private function normalizeNit(string $nit): string
+    {
+        $value = strtoupper(trim($nit));
+        $compact = preg_replace('/[\s.]+/', '', $value);
+
+        if (in_array($compact, ['CF', 'C/F', 'C-F', 'CONSUMIDORFINAL'], true)) {
+            return 'CF';
+        }
+
+        return preg_replace('/[^0-9K-]/', '', $compact);
+    }
+
+    private function normalizeMoney(mixed $value): string
+    {
+        $value = trim((string) $value);
+        $value = preg_replace('/[^\d,.-]/', '', $value);
+
+        if (str_contains($value, ',') && !str_contains($value, '.')) {
+            $value = str_replace(',', '.', $value);
+        } else {
+            $value = str_replace(',', '', $value);
+        }
+
+        return $value;
     }
 }

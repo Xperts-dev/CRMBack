@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Patient;
+use App\Models\StaffMember;
 use App\Support\AccountEmailer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -114,6 +115,15 @@ class AuthController extends Controller
             'email_verification_token' => Str::random(64),
             'email_verification_sent_at' => now(),
         ]);
+        StaffMember::updateOrCreate(
+            ['user_id' => $user->id],
+            [
+                'name' => $user->name,
+                'position' => $user->role,
+                'email' => $user->email,
+                'phone' => $user->phone,
+            ]
+        );
 
         $emailSent = $accountEmailer->sendWelcomeVerification($user);
 

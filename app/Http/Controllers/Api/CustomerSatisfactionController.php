@@ -85,7 +85,7 @@ class CustomerSatisfactionController extends Controller
             'staff_rating' => 'nullable|integer|min:1|max:5',
             'staff_comment' => 'nullable|string|max:2000',
             'overall_comment' => 'nullable|string|max:2000',
-            'services' => 'required|array|min:1',
+            'services' => 'nullable|array|min:1',
             'services.*.sale_item_id' => 'nullable|exists:sale_items,id',
             'services.*.product_id' => 'nullable|exists:products,id',
             'services.*.service_name' => 'nullable|string|max:255',
@@ -113,6 +113,8 @@ class CustomerSatisfactionController extends Controller
             $this->ensurePatientOwnsRecord((int) $sale->patient_id, $patient);
             $staffMemberId = $staffMemberId ?: optional($sale->user?->staffMember)->id;
         }
+
+        $validated['services'] = $validated['services'] ?? $this->defaultServicesFor($appointment, $sale, $validated);
 
         $this->ensureNotAlreadyRated($patient->id, $appointment?->id, $sale?->id);
 
@@ -213,5 +215,44 @@ class CustomerSatisfactionController extends Controller
         if ($exists) {
             abort(409, 'Este registro ya fue calificado');
         }
+    }
+
+    private function defaultServicesFor(?Appointment $appointment, ?Sale $sale, array $validated): array
+    {
+        $rating = $validated['staff_rating'] ?? null;
+
+        if (!$rating) {
+            throw ValidationException::withMessages([
+                'services' => ['Debes enviar al menos un servicio o una calificacion del personal.'],
+            ]);
+        }
+
+        if ($sale) {
+            $services = $sale->items->map(function (SaleItem $item) use ($rating) {
+                return [
+                    'sale_item_id' => $item->id,
+                    'product_id' => $item->product_id,
+                    'service_name' => $item->product?->name ?? 'Servicio',
+                    'rating' => $rating,
+                    'comment' => null,
+                ];
+            })->values()->all();
+
+            if ($services) {
+                return $services;
+            }
+        }
+
+        if ($appointment) {
+            return [[
+                'sale_item_id' => null,
+                'product_id' => null,
+                'service_name' => $appointment->service,
+                'rating' => $rating,
+                'comment' => null,
+            ]];
+        }
+
+        return [];
     }
 }

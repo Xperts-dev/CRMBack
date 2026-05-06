@@ -27,29 +27,7 @@ class DashboardController extends Controller
     public function stats(Request $request)
     {
         $user = $request->user();
-        $staffMember = null;
-        
-        // Si es doctor, obtener su staff_member
-        if ($user && $user->isDoctor()) {
-            $staffMember = $user->staffMember;
-            if (!$staffMember) {
-                return response()->json([
-                    'data' => [
-                        'monthly_income' => 0,
-                        'monthly_income_change' => 0,
-                        'new_patients_month' => 0,
-                        'new_patients_change' => 0,
-                        'average_ticket' => 0,
-                        'average_ticket_change' => 0,
-                        'return_rate' => 0,
-                        'today_appointments' => 0,
-                        'low_stock_products' => 0,
-                        'upcoming_appointments' => [],
-                        'monthly_performance' => []
-                    ]
-                ]);
-            }
-        }
+        $staffMember = $user && $user->isDoctor() ? $user->staffMember : null;
 
         $fromInput = $request->get('from', $request->get('date_from', $request->get('start_date')));
         $toInput = $request->get('to', $request->get('date_to', $request->get('end_date')));
@@ -70,14 +48,8 @@ class DashboardController extends Controller
         $previousRangeStart = $previousRangeEnd->copy()->subDays($rangeDays - 1)->startOfDay();
         $today = Carbon::today();
 
-        // Obtener IDs de pacientes del doctor (si aplica)
+        // Sales and patient metrics are business-wide so doctor/admin dashboards match.
         $patientIds = null;
-        if ($staffMember) {
-            $patientIds = Appointment::where('staff_member_id', $staffMember->id)
-                ->distinct()
-                ->pluck('patient_id')
-                ->toArray();
-        }
 
         // 1. Ingresos del rango seleccionado
         $monthlyIncomeQuery = Sale::whereBetween('created_at', [$rangeStart, $rangeEnd])

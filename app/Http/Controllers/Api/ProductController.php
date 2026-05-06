@@ -45,6 +45,8 @@ class ProductController extends Controller
      */
     public function store(Request $request)
     {
+        $this->normalizePriceInput($request);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255|regex:/^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s\-_.]+$/',
             'sku' => 'nullable|string|max:100|regex:/^[A-Z0-9\-]+$/|unique:products,sku',
@@ -77,6 +79,7 @@ class ProductController extends Controller
     public function update(Request $request, string $id)
     {
         $product = Product::findOrFail($id);
+        $this->normalizePriceInput($request);
 
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255|regex:/^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s\-_.]+$/',
@@ -160,5 +163,33 @@ class ProductController extends Controller
         $product->update(['image_url' => $imageUrl]);
 
         return response()->json(['image_url' => $imageUrl]);
+    }
+
+    private function normalizePriceInput(Request $request): void
+    {
+        if ($request->filled('sku')) {
+            $request->merge(['sku' => strtoupper(trim((string) $request->input('sku')))]);
+        }
+
+        foreach (['price', 'cost', 'costo', 'unit_price', 'unitPrice', 'unitCost'] as $alias) {
+            if ($request->has($alias) && $request->input($alias) !== null && $request->input($alias) !== '') {
+                $request->merge(['price' => $this->normalizeMoney($request->input($alias))]);
+                return;
+            }
+        }
+    }
+
+    private function normalizeMoney(mixed $value): string
+    {
+        $value = trim((string) $value);
+        $value = preg_replace('/[^\d,.-]/', '', $value);
+
+        if (str_contains($value, ',') && !str_contains($value, '.')) {
+            $value = str_replace(',', '.', $value);
+        } else {
+            $value = str_replace(',', '', $value);
+        }
+
+        return $value;
     }
 }

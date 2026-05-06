@@ -7,6 +7,7 @@ use App\Models\Document;
 use App\Models\DocumentSignature;
 use App\Models\Patient;
 use App\Services\AnalysisFormPdf;
+use App\Support\DocumentEmailer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use setasign\Fpdi\Fpdi;
@@ -14,6 +15,10 @@ use Throwable;
 
 class DocumentController extends Controller
 {
+    public function __construct(private readonly DocumentEmailer $documentEmailer)
+    {
+    }
+
     public function index(Request $request)
     {
         $validated = $request->validate([
@@ -70,10 +75,16 @@ class DocumentController extends Controller
             'type' => $validated['type'] ?? 'other',
             'requires_signature' => $canRequireSignature ? ($validated['requires_signature'] ?? false) : false,
         ]);
+        $emailSent = $this->documentEmailer->sendUploadedNotification(
+            $patient,
+            $document->title ?: $document->original_filename ?: $document->filename,
+            (bool) $document->requires_signature,
+        );
 
         return response()->json([
             'success' => true,
             'data' => $document,
+            'email_sent' => $emailSent,
             'message' => 'Documento subido correctamente',
         ], 201);
     }
@@ -140,10 +151,16 @@ class DocumentController extends Controller
             'type' => 'analysis_form',
             'requires_signature' => $canRequireSignature ? ($validated['requires_signature'] ?? true) : false,
         ]);
+        $emailSent = $this->documentEmailer->sendUploadedNotification(
+            $patient,
+            $document->title ?: $document->original_filename ?: $document->filename,
+            (bool) $document->requires_signature,
+        );
 
         return response()->json([
             'success' => true,
             'data' => $document,
+            'email_sent' => $emailSent,
             'message' => 'Ficha de datos generada correctamente',
         ], 201);
     }
@@ -158,11 +175,24 @@ class DocumentController extends Controller
         }
 
         $downloadPath = $this->downloadablePath($document);
+        $disk = Storage::disk('public');
+
+        if (!$disk->exists($downloadPath)) {
+            abort(404, 'Archivo no encontrado');
+        }
+
+        if (!request()->boolean('json')) {
+            return response()->download(
+                $disk->path($downloadPath),
+                $document->original_filename ?: $document->filename,
+                ['Content-Type' => $document->mime ?: 'application/octet-stream']
+            );
+        }
 
         return response()->json([
             'success' => true,
             'data' => [
-                'url' => Storage::disk('public')->url($downloadPath),
+                'url' => $disk->url($downloadPath),
                 'filename' => $document->original_filename,
             ],
         ]);
@@ -231,10 +261,18 @@ class DocumentController extends Controller
             'signed' => true,
             'signed_at' => now(),
         ]);
+        $document->loadMissing(['patient', 'uploadedBy']);
+        $emailSent = $this->documentEmailer->sendSignedNotification(
+            $document->uploadedBy?->email,
+            $document->uploadedBy?->name,
+            $document->patient?->name ?? 'Paciente',
+            $document->title ?: $document->original_filename ?: $document->filename,
+        );
 
         return response()->json([
             'success' => true,
             'data' => $signature,
+            'email_sent' => $emailSent,
             'message' => 'Documento firmado',
         ]);
     }

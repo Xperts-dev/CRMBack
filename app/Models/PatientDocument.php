@@ -50,7 +50,7 @@ class PatientDocument extends Model
             return Storage::disk('s3')->temporaryUrl($this->path, now()->addMinutes(60));
         }
         
-        return Storage::url($this->path);
+        return Storage::disk('public')->url($this->path);
     }
 
     public function markAsSigned(string $signaturePath): void

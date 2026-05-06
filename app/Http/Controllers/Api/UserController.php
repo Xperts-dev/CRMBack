@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Patient;
+use App\Models\StaffMember;
 use App\Models\User;
 use App\Support\AccountEmailer;
 use Illuminate\Http\Request;
@@ -71,6 +72,7 @@ class UserController extends Controller
 
         $user = User::create($validated);
         $this->syncPatientProfile($user);
+        $this->syncStaffProfile($user);
         $emailSent = $accountEmailer->sendWelcomeVerification($user);
 
         return response()->json($user->only(['id', 'name', 'email', 'role', 'phone', 'active', 'created_at']) + [
@@ -102,6 +104,7 @@ class UserController extends Controller
 
         $user->update($validated);
         $this->syncPatientProfile($user);
+        $this->syncStaffProfile($user);
 
         return response()->json($user->only(['id', 'name', 'email', 'role', 'phone', 'active', 'created_at', 'updated_at']));
     }
@@ -144,5 +147,24 @@ class UserController extends Controller
         if (empty($patient->qr_code)) {
             $patient->generateQRCode();
         }
+    }
+
+    private function syncStaffProfile(User $user): void
+    {
+        if (!in_array($user->role, ['admin', 'doctor', 'staff'], true)) {
+            StaffMember::where('user_id', $user->id)->delete();
+            return;
+        }
+
+        StaffMember::updateOrCreate(
+            ['user_id' => $user->id],
+            [
+                'name' => $user->name,
+                'position' => $user->role,
+                'phone' => $user->phone,
+                'email' => $user->email,
+                'avatar' => $user->photo_url,
+            ]
+        );
     }
 }

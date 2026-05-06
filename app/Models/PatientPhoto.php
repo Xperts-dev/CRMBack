@@ -38,7 +38,7 @@ class PatientPhoto extends Model
             return Storage::disk('s3')->temporaryUrl($this->path, now()->addMinutes(60));
         }
         
-        // For local storage
-        return Storage::url($this->path);
+        // For local public storage
+        return Storage::disk('public')->url($this->path);
     }
 }

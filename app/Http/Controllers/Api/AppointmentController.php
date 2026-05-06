@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Appointment;
 use App\Models\Patient;
+use App\Models\StaffMember;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -79,6 +80,8 @@ class AppointmentController extends Controller
 
     public function store(Request $request)
     {
+        $this->normalizeAppointmentInput($request);
+
         $validated = $request->validate([
             'patient_id' => 'nullable|exists:patients,id',
             'staff_member_id' => 'nullable|exists:staff_members,id',
@@ -102,6 +105,10 @@ class AppointmentController extends Controller
             $validated['patient_id'] = $patient->id;
         } elseif (empty($validated['patient_id'])) {
             return response()->json(['message' => 'El paciente es requerido'], 422);
+        }
+
+        if (empty($validated['staff_member_id']) && in_array($request->user()?->role, ['doctor', 'staff'], true)) {
+            $validated['staff_member_id'] = $this->staffMemberForUser($request)?->id;
         }
 
         $conflict = Appointment::query()
@@ -141,6 +148,8 @@ class AppointmentController extends Controller
         if (!$this->canAccessAppointment($request, $appointment)) {
             return response()->json(['message' => 'No autorizado'], 403);
         }
+
+        $this->normalizeAppointmentInput($request);
 
         $validated = $request->validate([
             'patient_id' => 'sometimes|required|exists:patients,id',
@@ -275,6 +284,8 @@ class AppointmentController extends Controller
             return response()->json(['message' => 'No autorizado'], 403);
         }
 
+        $this->normalizeAppointmentInput($request);
+
         $validated = $request->validate([
             'appointment_date' => 'required_without:date|date|after_or_equal:today',
             'date' => 'required_without:appointment_date|date|after_or_equal:today',
@@ -357,10 +368,20 @@ class AppointmentController extends Controller
             return response()->json(['message' => 'El paciente no tiene numero de telefono registrado'], 400);
         }
 
+        $message = sprintf(
+            'Hola %s, te recordamos tu cita de %s el %s a las %s.',
+            $appointment->patient->name,
+            $appointment->service,
+            Carbon::parse($appointment->appointment_date)->format('Y-m-d'),
+            Carbon::parse($appointment->appointment_time)->format('H:i')
+        );
+        $phone = preg_replace('/\D+/', '', $appointment->patient->phone);
+
         return response()->json([
             'sent' => false,
             'phone' => $appointment->patient->phone,
-            'message' => 'Endpoint disponible; configura Twilio/WhatsApp para envio real',
+            'whatsapp_url' => 'https://wa.me/' . $phone . '?text=' . rawurlencode($message),
+            'message' => 'Envio automatico no configurado; abre whatsapp_url para enviar el recordatorio',
         ]);
     }
 
@@ -424,6 +445,8 @@ class AppointmentController extends Controller
             return false;
         }
 
+        $mailer = (string) config('mail.default', 'log');
+        $deliveryMailer = !in_array($mailer, ['log', 'array'], true);
         $date = Carbon::parse($appointment->appointment_date)->locale('es')->translatedFormat('d/m/Y');
         $time = Carbon::parse($appointment->appointment_time)->format('h:i A');
         $staff = $appointment->staffMember ? ' con ' . $appointment->staffMember->name : '';
@@ -444,16 +467,73 @@ class AppointmentController extends Controller
                 $message->to($patient->email, $patient->name)->subject($subject);
             });
 
-            return true;
+            if (!$deliveryMailer) {
+                Log::info('Appointment email was generated but not delivered externally', [
+                    'appointment_id' => $appointment->id,
+                    'patient_id' => $patient->id,
+                    'email' => $patient->email,
+                    'mailer' => $mailer,
+                ]);
+            }
+
+            return $deliveryMailer;
         } catch (Throwable $exception) {
             Log::warning('Appointment email could not be sent', [
                 'appointment_id' => $appointment->id,
                 'patient_id' => $patient->id,
                 'email' => $patient->email,
+                'mailer' => $mailer,
                 'error' => $exception->getMessage(),
             ]);
 
             return false;
         }
+    }
+
+    private function normalizeAppointmentInput(Request $request): void
+    {
+        $aliases = [];
+
+        if (!$request->has('appointment_date') && $request->has('date')) {
+            $aliases['appointment_date'] = $request->input('date');
+        }
+
+        if (!$request->has('appointment_time') && $request->has('time')) {
+            $aliases['appointment_time'] = $request->input('time');
+        }
+
+        if (!$request->has('service') && $request->has('service_name')) {
+            $aliases['service'] = $request->input('service_name');
+        }
+
+        if ($aliases) {
+            $request->merge($aliases);
+        }
+
+        if ($request->filled('appointment_time')) {
+            $time = (string) $request->input('appointment_time');
+            if (preg_match('/^\d{2}:\d{2}$/', $time)) {
+                $request->merge(['appointment_time' => $time . ':00']);
+            }
+        }
+    }
+
+    private function staffMemberForUser(Request $request): ?StaffMember
+    {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['admin', 'doctor', 'staff'], true)) {
+            return null;
+        }
+
+        return StaffMember::firstOrCreate(
+            ['user_id' => $user->id],
+            [
+                'name' => $user->name,
+                'position' => $user->role,
+                'phone' => $user->phone,
+                'email' => $user->email,
+                'avatar' => $user->photo_url,
+            ]
+        );
     }
 }

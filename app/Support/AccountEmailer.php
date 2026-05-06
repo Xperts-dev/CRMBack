@@ -15,6 +15,8 @@ class AccountEmailer
             return false;
         }
 
+        $mailer = (string) config('mail.default', 'log');
+        $deliveryMailer = !in_array($mailer, ['log', 'array'], true);
         $verificationUrl = $user->email_verification_token
             ? url('/api/verify-email?token=' . urlencode($user->email_verification_token))
             : null;
@@ -42,11 +44,20 @@ class AccountEmailer
                     ->subject('Cuenta creada');
             });
 
-            return true;
+            if (!$deliveryMailer) {
+                Log::info('Account creation email was generated but not delivered externally', [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                    'mailer' => $mailer,
+                ]);
+            }
+
+            return $deliveryMailer;
         } catch (Throwable $exception) {
             Log::warning('Account creation email could not be sent', [
                 'user_id' => $user->id,
                 'email' => $user->email,
+                'mailer' => $mailer,
                 'error' => $exception->getMessage(),
             ]);
 

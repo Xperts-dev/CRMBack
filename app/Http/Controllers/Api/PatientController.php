@@ -6,37 +6,23 @@ use App\Http\Controllers\Controller;
 use App\Models\Patient;
 use App\Models\PatientPhoto;
 use App\Models\PatientDocument;
+use App\Support\DocumentEmailer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class PatientController extends Controller
 {
+    public function __construct(private readonly DocumentEmailer $documentEmailer)
+    {
+    }
+
     /**
      * Display a listing of the resource.
      */
     public function index(Request $request)
     {
-        $user = $request->user();
         $query = Patient::query()->with(['photos', 'documents']);
-
-        // Si es doctor, filtrar solo pacientes que tienen citas con él
-        if ($user && $user->isDoctor()) {
-            $staffMember = $user->staffMember;
-            
-            if ($staffMember) {
-                $query->whereHas('sales', function ($q) use ($staffMember) {
-                    // Pacientes que tienen ventas/tratamientos
-                    $q->whereNotNull('id');
-                })->orWhereHas('appointments', function ($q) use ($staffMember) {
-                    // O pacientes que tienen citas con este doctor
-                    $q->where('staff_member_id', $staffMember->id);
-                });
-            } else {
-                // Si es doctor pero no tiene staff_member, no mostrar nada
-                $query->whereRaw('1 = 0');
-            }
-        }
 
         // Search by name or email
         if ($request->has('search')) {
@@ -78,13 +64,15 @@ class PatientController extends Controller
      */
     public function store(Request $request)
     {
+        $this->normalizePatientInput($request);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255|regex:/^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/',
-            'email' => 'required|email:rfc,dns|unique:patients,email|max:255',
+            'email' => 'required|email|unique:patients,email|max:255',
             'phone' => 'nullable|string|max:20|regex:/^[0-9+\-\s()]+$/',
             'birthday' => 'nullable|date|before:today',
             'address' => 'nullable|string|max:500',
-            'nit' => 'nullable|string|max:100',
+            'nit' => 'nullable|string|max:100|regex:/^(?:CF|C\/F|C-F|[0-9Kk][0-9Kk\- ]*)$/',
         ]);
 
         $patient = Patient::create($validated);
@@ -98,24 +86,7 @@ class PatientController extends Controller
      */
     public function show(string $id, Request $request)
     {
-        $user = $request->user();
         $query = Patient::with(['photos', 'documents', 'sales']);
-
-        // Si es doctor, verificar que tenga acceso a este paciente
-        if ($user && $user->isDoctor()) {
-            $staffMember = $user->staffMember;
-            
-            if ($staffMember) {
-                $query->where(function ($q) use ($staffMember) {
-                    $q->whereHas('appointments', function ($subq) use ($staffMember) {
-                        $subq->where('staff_member_id', $staffMember->id);
-                    });
-                });
-            } else {
-                // Si es doctor pero no tiene staff_member, denegar acceso
-                return response()->json(['message' => 'No autorizado'], 403);
-            }
-        }
 
         $patient = $query->findOrFail($id);
         return response()->json($patient);
@@ -127,14 +98,15 @@ class PatientController extends Controller
     public function update(Request $request, string $id)
     {
         $patient = Patient::findOrFail($id);
+        $this->normalizePatientInput($request);
 
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255|regex:/^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/',
-            'email' => 'sometimes|required|email:rfc,dns|unique:patients,email,' . $id . '|max:255',
+            'email' => 'sometimes|required|email|unique:patients,email,' . $id . '|max:255',
             'phone' => 'nullable|string|max:20|regex:/^[0-9+\-\s()]+$/',
             'birthday' => 'nullable|date|before:today',
             'address' => 'nullable|string|max:500',
-            'nit' => 'nullable|string|max:100',
+            'nit' => 'nullable|string|max:100|regex:/^(?:CF|C\/F|C-F|[0-9Kk][0-9Kk\- ]*)$/',
         ]);
 
         $patient->update($validated);
@@ -192,6 +164,7 @@ class PatientController extends Controller
     public function uploadDocument(Request $request, string $id)
     {
         $patient = Patient::findOrFail($id);
+        $this->normalizePatientDocumentInput($request);
 
         $validated = $request->validate([
             'document' => 'required|file|mimes:pdf,doc,docx,txt|max:10240', // 10MB max
@@ -209,10 +182,16 @@ class PatientController extends Controller
             'type' => $validated['type'],
             'requires_signature' => $validated['requires_signature'] ?? false,
         ]);
+        $emailSent = $this->documentEmailer->sendUploadedNotification(
+            $patient,
+            $document->name,
+            (bool) $document->requires_signature,
+        );
 
         return response()->json([
             'document' => $document,
             'url' => $document->url,
+            'email_sent' => $emailSent,
         ], 201);
     }
 
@@ -244,6 +223,7 @@ class PatientController extends Controller
     public function addLoyaltyPoints(Request $request, string $id)
     {
         $patient = Patient::findOrFail($id);
+        $this->normalizePointsInput($request);
 
         $validated = $request->validate([
             'points' => 'required|integer|min:1|max:10000',
@@ -263,6 +243,7 @@ class PatientController extends Controller
     public function redeemLoyaltyPoints(Request $request, string $id)
     {
         $patient = Patient::findOrFail($id);
+        $this->normalizePointsInput($request);
 
         $validated = $request->validate([
             'points' => 'required|integer|min:1|max:10000',
@@ -299,22 +280,30 @@ class PatientController extends Controller
             abort(403, 'No tienes permisos para buscar o crear pacientes');
         }
 
+        $this->normalizePatientInput($request);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'nullable|email|max:255',
-            'phone' => 'required|string|max:30',
+            'phone' => 'nullable|string|max:30|required_without_all:email,nit',
             'birthday' => 'nullable|date',
             'address' => 'nullable|string|max:500',
-            'nit' => 'nullable|string|max:100',
+            'nit' => 'nullable|string|max:100|regex:/^(?:CF|C\/F|C-F|[0-9Kk][0-9Kk\- ]*)$/',
         ]);
 
-        $normalizedPhone = $this->normalizePhone($validated['phone']);
+        $normalizedPhone = $this->normalizePhone($validated['phone'] ?? null);
         $existing = Patient::query()
             ->where(function ($query) use ($validated, $normalizedPhone) {
-                $query->whereRaw("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') = ?", [$normalizedPhone]);
+                if ($normalizedPhone !== '') {
+                    $query->whereRaw("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') = ?", [$normalizedPhone]);
+                }
 
                 if (!empty($validated['email'])) {
                     $query->orWhere('email', strtolower($validated['email']));
+                }
+
+                if (!empty($validated['nit'])) {
+                    $query->orWhere('nit', $validated['nit']);
                 }
             })
             ->latest()
@@ -331,7 +320,7 @@ class PatientController extends Controller
         $patient = Patient::create([
             'name' => $validated['name'],
             'email' => $validated['email'] ?? ('sin-email-' . Str::uuid() . '@crm.local'),
-            'phone' => $validated['phone'],
+            'phone' => $validated['phone'] ?? null,
             'birthday' => $validated['birthday'] ?? null,
             'address' => $validated['address'] ?? null,
             'nit' => $validated['nit'] ?? null,
@@ -349,6 +338,65 @@ class PatientController extends Controller
     private function normalizePhone(?string $phone): string
     {
         return preg_replace('/\D+/', '', (string) $phone);
+    }
+
+    private function normalizePatientInput(Request $request): void
+    {
+        $updates = [];
+
+        foreach (['nit', 'customer_nit', 'tax_id', 'taxId'] as $alias) {
+            if (!$request->filled($alias)) {
+                continue;
+            }
+
+            $updates['nit'] = $this->normalizeNit((string) $request->input($alias));
+            break;
+        }
+
+        if ($request->filled('email')) {
+            $updates['email'] = strtolower(trim((string) $request->input('email')));
+        }
+
+        if ($updates) {
+            $request->merge($updates);
+        }
+    }
+
+    private function normalizePointsInput(Request $request): void
+    {
+        if ($request->has('points')) {
+            return;
+        }
+
+        foreach (['loyalty_points', 'amount', 'quantity'] as $alias) {
+            if ($request->has($alias)) {
+                $request->merge(['points' => $request->input($alias)]);
+                return;
+            }
+        }
+    }
+
+    private function normalizeNit(string $nit): string
+    {
+        $value = strtoupper(trim($nit));
+        $compact = preg_replace('/[\s.]+/', '', $value);
+
+        if (in_array($compact, ['CF', 'C/F', 'C-F', 'CONSUMIDORFINAL'], true)) {
+            return 'CF';
+        }
+
+        return preg_replace('/[^0-9K-]/', '', $compact);
+    }
+
+    private function normalizePatientDocumentInput(Request $request): void
+    {
+        if (!$request->hasFile('document') && $request->hasFile('file')) {
+            $request->files->set('document', $request->file('file'));
+        }
+
+        if (!$request->has('name') && $request->has('title')) {
+            $request->merge(['name' => $request->input('title')]);
+        }
     }
 
     private function storeBase64PatientPhoto(string $payload, int $patientId, string $type): string
