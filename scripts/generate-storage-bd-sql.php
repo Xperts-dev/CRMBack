@@ -53,6 +53,49 @@ function slug_code(string $value, string $prefix): string
     return substr($prefix . '-' . $slug . '-' . strtoupper(substr(hash('sha1', $value), 0, 8)), 0, 100);
 }
 
+function product_description(string $name, string $type): string
+{
+    $normalized = mb_strtolower($name, 'UTF-8');
+
+    if ($type === 'service') {
+        $patterns = [
+            '/botox|toxina/u' => 'Servicio estetico facial para suavizar lineas de expresion.',
+            '/facial|limpieza|peeling|hidrafacial/u' => 'Servicio de cuidado facial y mejora de la piel.',
+            '/laser|depilacion|depilación/u' => 'Servicio estetico con tecnologia laser.',
+            '/emsculpt|emtone|exilis|velox|verju|morpheus|hifu/u' => 'Servicio corporal o facial con tecnologia estetica especializada.',
+            '/prp|plasma/u' => 'Servicio regenerativo de apoyo para piel y cabello.',
+            '/masaje|linfatico|linfático/u' => 'Servicio corporal de bienestar y drenaje.',
+        ];
+
+        foreach ($patterns as $pattern => $description) {
+            if (preg_match($pattern, $normalized) === 1) {
+                return $description;
+            }
+        }
+
+        return 'Servicio estetico disponible en clinica.';
+    }
+
+    $patterns = [
+        '/protector|heliocare|isdin|spf|solar/u' => 'Producto de cuidado solar para uso diario.',
+        '/collagen|colageno|colágeno|hialuronico|hialurónico/u' => 'Suplemento o producto de apoyo para el cuidado de la piel.',
+        '/vitamina|cevilat|suplemento|protocol/u' => 'Producto de apoyo nutricional y bienestar.',
+        '/teoxane|3d lip|lips|relleno|filler/u' => 'Producto especializado para tratamiento estetico facial.',
+        '/crema|gel|serum|suero|booster|limpiador|tonico|tónico/u' => 'Producto dermocosmetico para rutina de cuidado facial.',
+        '/shampoo|mascarilla|capilar|cabello/u' => 'Producto para cuidado capilar.',
+        '/xxtralash|pesta/u' => 'Producto cosmetico para cuidado de pestanas.',
+        '/acne|acné|despigmentante|mancha|pigment/u' => 'Producto dermocosmetico para necesidades especificas de la piel.',
+    ];
+
+    foreach ($patterns as $pattern => $description) {
+        if (preg_match($pattern, $normalized) === 1) {
+            return $description;
+        }
+    }
+
+    return 'Producto para venta en clinica y cuidado personal.';
+}
+
 function legacy_email_for_patient(string $name): string
 {
     return 'legacy+' . substr(hash('sha1', mb_strtolower($name, 'UTF-8')), 0, 16) . '@import.local';
@@ -322,7 +365,7 @@ foreach ($products as $product) {
         "INSERT INTO products (name, sku, description, price, stock, type, active, created_at, updated_at) VALUES (%s, %s, %s, %s, 0, %s, 1, NOW(), NOW()) ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), price = VALUES(price), type = VALUES(type), active = VALUES(active), updated_at = NOW();",
         sql_quote($product['name']),
         sql_quote($product['sku']),
-        sql_quote('Importado desde reportes mensuales'),
+        sql_quote(product_description($product['name'], $product['type'])),
         sql_number($product['price']),
         sql_quote($product['type'])
     );

@@ -14,21 +14,30 @@ class ProductController extends Controller
      */
     public function index(Request $request)
     {
+        $validated = $request->validate([
+            'type' => 'nullable|in:product,service',
+            'active' => 'nullable|boolean',
+            'search' => 'nullable|string|max:255',
+            'per_page' => 'nullable|integer|min:1|max:100',
+            'sort_by' => 'nullable|in:name,sku,price,stock,type,active,created_at,updated_at',
+            'sort_direction' => 'nullable|in:asc,desc',
+        ]);
+
         $query = Product::query();
 
         // Filter by type
-        if ($request->has('type')) {
-            $query->where('type', $request->type);
+        if (array_key_exists('type', $validated) && $validated['type'] !== null) {
+            $query->where('type', $validated['type']);
         }
 
         // Filter active/inactive
-        if ($request->has('active')) {
+        if (array_key_exists('active', $validated) && $validated['active'] !== null) {
             $query->where('active', $request->boolean('active'));
         }
 
         // Search
-        if ($request->has('search')) {
-            $search = $request->search;
+        if (!empty($validated['search'])) {
+            $search = $validated['search'];
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                   ->orWhere('sku', 'like', "%{$search}%")
@@ -36,7 +45,16 @@ class ProductController extends Controller
             });
         }
 
-        $products = $query->paginate(20);
+        $sortBy = $validated['sort_by'] ?? 'name';
+        $sortDirection = $validated['sort_direction'] ?? 'asc';
+        $perPage = $validated['per_page'] ?? 20;
+
+        $products = $query
+            ->orderBy($sortBy, $sortDirection)
+            ->orderBy('id')
+            ->paginate($perPage)
+            ->withQueryString();
+
         return response()->json($products);
     }
 
