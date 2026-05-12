@@ -44,6 +44,10 @@ class ProfileController extends Controller
             'email' => ['sometimes', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
         ]);
 
+        if (array_key_exists('email', $validated) && Schema::hasColumn('users', 'must_change_email')) {
+            $validated['must_change_email'] = false;
+        }
+
         $user->update($validated);
 
         if ($user->isPatient() && !empty($validated)) {

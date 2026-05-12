@@ -24,6 +24,7 @@ class User extends Authenticatable
         'email',
         'password',
         'must_change_password',
+        'must_change_email',
         'role',
         'phone',
         'active',
@@ -56,6 +57,7 @@ class User extends Authenticatable
             'email_verified' => 'boolean',
             'active' => 'boolean',
             'must_change_password' => 'boolean',
+            'must_change_email' => 'boolean',
             'password' => 'hashed',
         ];
     }

@@ -274,6 +274,10 @@ if (!function_exists('monthlyReportUserId')) {
             $row['must_change_password'] = true;
         }
 
+        if (Schema::hasColumn('users', 'must_change_email')) {
+            $row['must_change_email'] = true;
+        }
+
         if (Schema::hasColumn('users', 'email_verified_at')) {
             $row['email_verified_at'] = now();
         }

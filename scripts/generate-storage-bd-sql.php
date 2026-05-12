@@ -344,7 +344,7 @@ $lines[] = '-- Patients from px.xlsx and monthly reports';
 foreach ($patients as $patient) {
     $email = legacy_email_for_patient($patient['name']);
     $lines[] = sprintf(
-        "INSERT INTO users (name, email, password, must_change_password, role, active, email_verified, email_verified_at, created_at, updated_at) VALUES (%s, %s, %s, 1, 'patient', 1, 1, NOW(), NOW(), NOW()) ON DUPLICATE KEY UPDATE name = VALUES(name), role = 'patient', active = 1, updated_at = NOW();",
+        "INSERT INTO users (name, email, password, must_change_password, must_change_email, role, active, email_verified, email_verified_at, created_at, updated_at) VALUES (%s, %s, %s, 1, 1, 'patient', 1, 1, NOW(), NOW(), NOW()) ON DUPLICATE KEY UPDATE name = VALUES(name), must_change_email = 1, role = 'patient', active = 1, updated_at = NOW();",
         sql_quote($patient['name']),
         sql_quote($email),
         sql_quote($legacyPatientPasswordHash)
