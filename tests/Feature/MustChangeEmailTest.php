@@ -64,4 +64,14 @@ class MustChangeEmailTest extends TestCase
             'email' => 'correo.real@example.com',
         ]);
     }
+
+    public function test_non_crm_users_do_not_keep_must_change_email_enabled(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'correo.real@example.com',
+            'must_change_email' => true,
+        ]);
+
+        $this->assertFalse($user->fresh()->must_change_email);
+    }
 }

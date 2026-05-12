@@ -37,6 +37,8 @@ class UserPatientSyncTest extends TestCase
 
         $user = User::where('email', 'paciente.demo@example.com')->firstOrFail();
 
+        $this->assertFalse($user->must_change_email);
+
         $this->assertDatabaseHas('patients', [
             'user_id' => $user->id,
             'name' => 'Paciente Demo',

@@ -81,6 +81,15 @@ class User extends Authenticatable
         );
     }
 
+    protected static function booted(): void
+    {
+        static::saving(function (self $user): void {
+            if ($user->email === null || !str_ends_with(strtolower($user->email), '@crm.com')) {
+                $user->must_change_email = false;
+            }
+        });
+    }
+
     // Role helpers
     public function isAdmin(): bool
     {

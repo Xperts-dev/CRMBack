@@ -177,6 +177,13 @@ if (!function_exists('monthlyReportPatientEmail')) {
     }
 }
 
+if (!function_exists('monthlyReportShouldChangeEmail')) {
+    function monthlyReportShouldChangeEmail(string $email): bool
+    {
+        return str_ends_with(strtolower($email), '@crm.com');
+    }
+}
+
 if (!function_exists('monthlyReportSku')) {
     function monthlyReportSku(string $name): string
     {
@@ -275,7 +282,7 @@ if (!function_exists('monthlyReportUserId')) {
         }
 
         if (Schema::hasColumn('users', 'must_change_email')) {
-            $row['must_change_email'] = true;
+            $row['must_change_email'] = monthlyReportShouldChangeEmail($email);
         }
 
         if (Schema::hasColumn('users', 'email_verified_at')) {
